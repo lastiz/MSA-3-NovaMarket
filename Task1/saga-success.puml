@@ -1,0 +1,79 @@
+@startuml Saga-success
+title Saga оформления - успешный сценарий
+actor "Покупатель" as buyer
+participant "Приложение / NGINX" as app
+participant "Cart Service" as cart
+participant "Order Service" as order
+queue Kafka as bus
+participant "Catalog Service" as catalog
+participant "Inventory Service" as inventory
+participant "Payment Service" as payment
+participant "Платежный провайдер" as pay
+participant "Delivery Service" as delivery
+participant "Логистический провайдер" as logistics
+participant "Notification Service" as notification
+
+buyer -> app : Открыть корзину
+app -> cart : Получить корзину
+cart -> catalog : Получить актуальные данные товаров
+catalog --> cart : Названия, цены и доступность
+cart --> app : Состав корзины и предварительная сумма
+buyer -> app : Подтвердить корзину, адрес и способы оплаты/доставки
+app -> order : Создать заказ: позиции, ожидаемые цены, адрес и способы
+order -> order : Сохранить заказ, статус: Проверяется
+order --> app : Заказ принят, идентификатор
+order ->> bus : OrderCreated
+bus ->> catalog : OrderCreated
+catalog -> catalog : Проверить цены и товары
+catalog ->> bus : OrderValidated
+bus ->> order : OrderValidated
+order -> order : Зафиксировать проверенные цены и сумму
+bus ->> inventory : OrderValidated
+inventory -> inventory : Зарезервировать все позиции
+inventory ->> bus : StockReserved
+inventory ->> bus : StockChanged
+bus ->> catalog : StockChanged
+bus ->> order : StockReserved
+order -> order : Ожидает оплаты
+bus ->> payment : StockReserved
+alt Оплата через платежную страницу
+  payment -> pay : Начать оплату
+  pay --> payment : Ссылка оплаты
+  payment ->> bus : PaymentReady
+  bus ->> order : PaymentReady
+  app -> order : Получить ссылку оплаты
+  order --> app : Ссылка оплаты
+  buyer -> pay : Оплатить заказ, при согласии привязать карту
+else Привязанная карта
+  payment -> pay : Автоматически оплатить привязанной картой
+end
+payment -> pay : Проверить результат
+pay --> payment : Оплата подтверждена
+payment ->> bus : PaymentSucceeded
+bus ->> order : PaymentSucceeded
+order -> order : Оплачен, оформляется доставка
+bus ->> delivery : PaymentSucceeded
+delivery -> logistics : Создать заявку
+logistics --> delivery : Заявка создана, трек-номер и дата
+delivery ->> bus : DeliveryCreated
+bus ->> order : DeliveryCreated
+order -> order : Проверка, резерв, оплата и доставка подтверждены
+order -> order : Оплачен и готовится к отправке
+order ->> bus : OrderConfirmed
+bus ->> notification : OrderConfirmed
+notification -> notification : Уведомления покупателю и продавцу
+
+== Отслеживание после оформления ==
+loop Передан в доставку, доставлен
+  delivery -> logistics : Получить статус
+  logistics --> delivery : Статус доставки
+  delivery ->> bus : DeliveryStatusChanged
+  bus ->> order : DeliveryStatusChanged
+  order -> order : Обновить статус, трек-номер и дату доставки
+  bus ->> inventory : DeliveryStatusChanged
+  inventory -> inventory : При отгрузке списать резерв один раз
+  bus ->> notification : DeliveryStatusChanged
+end
+app -> order : Открыть заказ
+order --> app : Состав, сумма, адрес, способы, статус, трек-номер и дата
+@enduml

@@ -1,0 +1,33 @@
+@startuml Saga-validation-failed
+title Saga оформления - ошибки проверки цены и остатка
+participant "Order Service" as Order
+queue Kafka as bus
+participant "Catalog Service" as Catalog
+participant "Inventory Service" as Inventory
+participant "Notification Service" as Notification
+
+Order ->> bus : OrderCreated
+bus ->> Catalog : OrderCreated
+alt Цена изменилась или товар удален
+  Catalog ->> bus : OrderValidationFailed
+  bus ->> Order : OrderValidationFailed
+  Order -> Order : Отменен: требуется новое подтверждение покупателя
+else Проверка успешна, но товара недостаточно
+  Catalog ->> bus : OrderValidated
+  bus ->> Order : OrderValidated
+  bus ->> Inventory : OrderValidated
+  Inventory -> Inventory : Откатить локальную транзакцию резерва
+  Inventory ->> bus : StockReservationFailed
+  bus ->> Order : StockReservationFailed
+  Order -> Order : Отменен: недостаточно товара
+end
+Order ->> bus : OrderCancelled
+bus ->> Notification : OrderCancelled
+Notification -> Notification : Сохранить причину отмены для покупателя
+note over Order, Inventory
+Платеж еще не запускался, резерва нет.
+Возврат денег и снятие резерва не нужны.
+Технический сбой проверки повторяется,
+а не трактуется как отсутствие товара.
+end note
+@enduml

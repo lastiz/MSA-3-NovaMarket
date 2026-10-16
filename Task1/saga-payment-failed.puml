@@ -1,0 +1,38 @@
+@startuml Saga-payment-failed
+title Saga оформления - отказ или истечение срока оплаты
+participant "Order Service" as Order
+queue Kafka as bus
+participant "Inventory Service" as Inventory
+participant "Payment Service" as Payment
+participant "Платежный провайдер" as provider
+participant "Catalog Service" as Catalog
+participant "Notification Service" as Notification
+
+note over Order, Payment : Товары зарезервированы, оплата начата
+alt Провайдер отклонил платеж
+  Payment -> provider : Проверить окончательный результат
+  provider --> Payment : Отказ, списания нет
+else Истек срок оплаты
+  Payment -> provider : Отменить незавершенную оплату и проверить результат
+  provider --> Payment : Оплата отменена, списания нет
+end
+note over Payment, provider
+При таймауте сначала сверяется результат.
+Если списание успело пройти, продолжается успешный сценарий.
+Пока результат неизвестен, резерв не снимается.
+end note
+Payment ->> bus : PaymentFailed
+bus ->> Order : PaymentFailed
+Order -> Order : Статус: Отмена выполняется
+bus ->> Inventory : PaymentFailed
+Inventory -> Inventory : Освободить резерв, повторять при технической ошибке
+Inventory ->> bus : StockReleased
+Inventory ->> bus : StockChanged
+bus ->> Catalog : StockChanged
+bus ->> Order : StockReleased
+Order -> Order : Отказ оплаты и снятие резерва подтверждены
+Order -> Order : Статус: Отменен
+Order ->> bus : OrderCancelled
+bus ->> Notification : OrderCancelled
+Notification -> Notification : Сохранить уведомление об отмене
+@enduml
