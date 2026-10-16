@@ -1,0 +1,66 @@
+@startuml C2-history
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+title NovaMarket - C2, история заказов с CQRS
+
+Person(buyer, "Покупатель", "Оформление, история заказов, чеки, отзывы и повторный заказ")
+Person(seller, "Продавец", "Уведомления и просмотр своих заказов")
+System_Ext(pay, "Платежный провайдер", "Оплата, привязка карты, возврат и чеки")
+System_Ext(logistics, "Логистический провайдер", "Заявки и статусы доставки")
+
+System_Boundary(nova, "NovaMarket") {
+  Container(mobile, "Мобильное приложение", "iOS / Android", "Интерфейс покупателя и продавца в MVP")
+  Container(gateway, "API Gateway", "NGINX", "Маршрутизация запросов")
+  Container(catalog, "Catalog Service", "Service, PostgreSQL", "Каталог, цены, фильтры, отзывы и рейтинг")
+  Container(cart, "Cart Service", "Service, PostgreSQL", "Корзина, добавление товаров для повторного заказа")
+  Container(order, "Order Service", "Service, PostgreSQL", "Оформление, состав и текущие статусы заказов")
+  Container(inventory, "Inventory Service", "Service, PostgreSQL", "Остатки и резервирование товаров")
+  Container(payment, "Payment Service", "Service, PostgreSQL", "Оплата, возврат средств, получение и хранение чеков")
+  Container(delivery, "Delivery Service", "Service, PostgreSQL", "Доставка, трек-номер и ожидаемая дата")
+  Container(notification, "Notification Service", "Service, PostgreSQL", "Уведомления покупателю и продавцу")
+  Container(history, "Order History Service", "Service, PostgreSQL", "CQRS: готовая модель чтения списка и деталей заказов")
+
+  ContainerQueue(orders, "Топик orders", "Apache Kafka", "OrderCreated, OrderValidated, OrderValidationFailed, OrderConfirmed, OrderCancelled")
+  ContainerQueue(stock, "Топик inventory", "Apache Kafka", "StockReserved, StockReservationFailed, StockReleased, StockChanged")
+  ContainerQueue(payments, "Топик payments", "Apache Kafka", "PaymentReady, PaymentSucceeded, PaymentFailed, RefundSucceeded, ReceiptReady")
+  ContainerQueue(deliveries, "Топик delivery", "Apache Kafka", "DeliveryCreated, DeliveryCreationFailed, DeliveryStatusChanged")
+}
+
+Rel(buyer, mobile, "Использует")
+Rel(seller, mobile, "Использует")
+Rel(mobile, gateway, "Запросы", "HTTPS")
+Rel(gateway, catalog, "Каталог, карточки, чтение и добавление отзывов", "REST")
+Rel(gateway, cart, "Корзина, добавить позиции из истории", "REST")
+Rel(cart, catalog, "Актуальные данные товаров корзины", "REST")
+Rel(gateway, order, "Оформление и текущие статусы заказов", "REST")
+Rel(gateway, notification, "Уведомления", "REST")
+Rel(gateway, history, "Список и детали своих заказов", "REST")
+Rel(gateway, payment, "Скачать чек своего заказа", "REST")
+Rel(mobile, pay, "Платежная страница", "HTTPS")
+Rel(payment, pay, "Оплата, проверка результата, возврат, получение чека", "HTTPS")
+Rel(delivery, logistics, "Заявки и статусы", "HTTPS")
+
+Rel(order, orders, "Публикует", "Kafka")
+Rel(catalog, orders, "Публикует", "Kafka")
+Rel(inventory, stock, "Публикует", "Kafka")
+Rel(payment, payments, "Публикует", "Kafka")
+Rel(delivery, deliveries, "Публикует", "Kafka")
+
+Rel(orders, catalog, "OrderCreated", "Kafka")
+Rel(orders, notification, "OrderConfirmed, OrderCancelled", "Kafka")
+Rel(orders, inventory, "OrderValidated", "Kafka")
+Rel(orders, order, "OrderValidated, OrderValidationFailed", "Kafka")
+Rel(stock, order, "StockReserved, StockReservationFailed, StockReleased", "Kafka")
+Rel(stock, payment, "StockReserved", "Kafka")
+Rel(stock, catalog, "StockChanged", "Kafka")
+Rel(payments, order, "PaymentReady, PaymentSucceeded, PaymentFailed, RefundSucceeded", "Kafka")
+Rel(payments, delivery, "PaymentSucceeded", "Kafka")
+Rel(payments, inventory, "PaymentFailed, RefundSucceeded", "Kafka")
+Rel(deliveries, order, "DeliveryCreated, DeliveryCreationFailed, DeliveryStatusChanged", "Kafka")
+Rel(deliveries, payment, "DeliveryCreationFailed", "Kafka")
+Rel(deliveries, inventory, "DeliveryStatusChanged", "Kafka")
+Rel(deliveries, notification, "DeliveryStatusChanged", "Kafka")
+
+Rel(orders, history, "OrderCreated, OrderValidated, OrderConfirmed, OrderCancelled", "Kafka")
+Rel(payments, history, "PaymentSucceeded, RefundSucceeded, ReceiptReady", "Kafka")
+Rel(deliveries, history, "DeliveryCreated, DeliveryStatusChanged", "Kafka")
+@enduml

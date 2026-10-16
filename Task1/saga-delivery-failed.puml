@@ -1,0 +1,40 @@
+@startuml Saga-delivery-failed
+title Saga оформления - отказ доставки
+participant "Order Service" as order
+queue Kafka as bus
+participant "Delivery Service" as delivery
+participant "Логистический провайдер" as logistics
+participant "Payment Service" as payment
+participant "Платежный провайдер" as pay
+participant "Inventory Service" as inventory
+participant "Catalog Service" as catalog
+participant "Notification Service" as notification
+
+note over order, inventory : Заказ оплачен, товары зарезервированы
+bus ->> delivery : PaymentSucceeded
+delivery -> logistics : Создать заявку
+logistics --> delivery : Окончательный отказ, активной заявки нет
+note over delivery, logistics
+При таймауте сначала проверяется результат.
+Если заявка создана, продолжается успешный сценарий.
+end note
+delivery ->> bus : DeliveryCreationFailed
+bus ->> order : DeliveryCreationFailed
+order -> order : Отмена выполняется
+bus ->> payment : DeliveryCreationFailed
+payment -> pay : Вернуть деньги
+note over payment, pay : При ошибке или неизвестном результате - проверка и повтор
+pay --> payment : Возврат подтвержден
+payment ->> bus : RefundSucceeded
+bus ->> order : RefundSucceeded
+bus ->> inventory : RefundSucceeded
+inventory -> inventory : Снять резерв, повторить при ошибке
+inventory ->> bus : StockReleased
+inventory ->> bus : StockChanged
+bus ->> catalog : StockChanged
+bus ->> order : StockReleased
+order -> order : Возврат и снятие резерва подтверждены, заказ отменен
+order ->> bus : OrderCancelled
+bus ->> notification : OrderCancelled
+notification -> notification : Уведомить об отмене и возврате
+@enduml

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: scaletestapp
+description: Autoscaling for scaletestapp
+type: application
+version: 0.1.0
+appVersion: "latest"
